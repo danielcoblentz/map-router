@@ -23,12 +23,16 @@
      // to record how many vertices were visited this run
      private int lastVisitedCount;
  
+     // allocated once and emptied per query, so no query pays O(V) for the queue
+     private final IndexPQ pq;
+ 
      public Dijkstra(EuclideanGraph G) {
          this.G = G;
          int V  = G.V();
          dist = new double[V];
          pred = new int[V];
          seen = new int[V];  // default 0 = never seen
+         pq   = new IndexPQ(V);
      }
  
      // enable A* mode by setting the target (goal) node
@@ -87,7 +91,7 @@
      // optimized Dijkstra's 
      private void dijkstra(int s, int d) {
          queryId++;  // start a new query
-         IndexPQ pq = new IndexPQ(G.V());
+         pq.clear();
  
          // initialize only source vertex
          dist[s] = 0.0;

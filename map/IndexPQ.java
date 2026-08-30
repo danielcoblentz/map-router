@@ -44,6 +44,10 @@
         maxPQSize = Math.max(maxPQSize, N);
     }
 
+    // empty the queue in O(1) so it can be reused for the next query;
+    // qp[] and priority[] are only ever read for keys inserted since the reset
+    public void clear() { N = 0; }
+
     // remove and return the key with smallest priority
     public int delMin() {
         delMinCount++;
