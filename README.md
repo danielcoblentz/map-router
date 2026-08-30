@@ -1,99 +1,96 @@
-# Map Routing with Optimized Shortest-Path
+# Map Routing
 
-## What is Dijkstra’s Algorithm?
+Repeated shortest-path queries on the continental US road network, using A* search, a lazy per-query reset, and a 4-ary indexed priority queue.
 
-[Dijkstra’s algorithm](https://www.w3schools.com/dsa/dsa_algo_graphs_dijkstra.php), devised by Edsger W. Dijkstra in 1959, is a graph‐search procedure that finds the minimum‐cost routes from a chosen starting vertex to every other vertex in a weighted graph. You begin by setting the source’s distance to zero and all others to “infinity,” then repeatedly:
+## Provenance
 
-1. Pick the unvisited node with the smallest tentative distance.
-2. “Relax” each of its outgoing edges—if going through this node yields a shorter path to a neighbor, update that neighbor’s distance.
-3. Mark the node visited and continue until all nodes are settled or, if you only care about one target, stop as soon as you’ve reached it.
+This is coursework, not an independent build.
+The assignment shipped a template: the graph representation, the file and stdin readers, the turtle graphics, the map data, a C reference implementation under `map/c/`, and a working plain Dijkstra.
+What I wrote is the optimisation layer on top of that template, the instrumentation, the tests, and the fixes described below.
+The writeup I submitted with the assignment, including the hours logged and the limitations I reported at the time, is kept verbatim in `map/readme_class.txt`.
 
-Although the original formulation computes a full “shortest‐path tree,” early termination is often preferred for single-pair queries. Typical applications include road navigation (cities as vertices, distances as weights), network routing, and any domain requiring efficient, reliable pathfinding.
+Commit `dd873a0` is the untouched starter code, so `git diff dd873a0 -- map` shows exactly what I changed.
 
+### Provided
 
-<div style="text-align: center;">
-  <img src="https://www3.cs.stonybrook.edu/~skiena/combinatorica/animations/anim/dijkstra.gif" alt="Dijkstra's animation">
-  <p>Figure 1: Dijkstra's Algorithm simulation</p>
-</div>
+`EuclideanGraph.java`, `Point.java`, `In.java`, `StdIn.java`, `Turtle.java`, `IntIterator.java`, `Distances.java`, `ShortestPath.java` and `Paths.java`.
+The original `Dijkstra.java`, a plain Dijkstra with no early exit that rebuilt `dist[]`, `pred[]` and the queue on every query.
+The original `IndexPQ.java`, a binary heap taken from Sedgewick, Algorithms in Java, 3rd edition.
+Everything under `map/c/`, and every `usa-*.txt`, `grid*.txt` and `input6.txt` data or query file.
 
+### Mine
 
+- The lazy per-query reset in `Dijkstra`.
+- The A* heuristic and the early exit when the destination is dequeued.
+- The 4-ary heap in `IndexPQ`, replacing the provided binary heap.
+- The counters in `IndexPQ` and the per-query and summary reporting in `Paths`.
+- The bug fixes below and the JUnit tests under `test/`.
 
+## Known limitations
 
+**`usa.txt` is not connected, and three of the shipped queries have no answer.**
+The graph has seven connected components.
+Vertices 20901, 19295 and 35957 each sit with a single neighbour in a two-vertex component, and `usa-1000long.txt` and `usa-50000short.txt` between them contain three queries that start in those components.
+The version I submitted hung on all three.
+`drawPath` guarded on `pred[d] == -1`, but under the lazy reset `pred[]` is deliberately never cleared, so for a destination the current query never touched it followed a stale predecessor chain and never terminated.
+At the time I deleted those three query lines from the input files to get a clean run.
+The lines are restored, `drawPath` now uses the same reachability test as `showPath`, and the three queries print `No path from ... to ...` and carry on.
 
-## Abstract
+**`Distances` does not use A*.**
+Only `Paths` and `ShortestPath` call `enableAStar`, so `java Distances` runs plain Dijkstra with the lazy reset and the 4-ary heap.
 
-This project reads a road network graph and answers repeated shortest‐path queries using optimized search techniques. Starting from a basic Dijkstra implementation, we introduced three major enhancements:
+**The heuristic assumes Euclidean edge weights.**
+Edge cost is the straight-line distance between endpoints, so straight-line distance to the goal never overestimates and the search stays optimal.
+A cost model such as travel time would need a different heuristic.
 
-1. **Lazy distance reset**—reinitialize only the vertices touched in the current query.
+## Key algorithms
 
-2. **A\* heuristic**—guide the search by adding the Euclidean distance to the destination.
+### A* heuristic
 
-3. **4-ary heap**—replace the binary heap with a four-way heap in the priority queue to reduce its height and speed up operations.
+Plain Dijkstra expands the frontier evenly in every direction.
+A* orders the queue by `f(n) = g(n) + h(n)`, where `g(n)` is the cost from the source and `h(n)` is the straight-line distance from `n` to the destination, which pulls the search towards the goal.
 
-These optimizations together cut per‐query runtime from hundreds of milliseconds to just a few tens of milliseconds on large, sparse maps (e.g., the continental-U.S. road network).  The code supports distance‐only queries, path printing, and turtle–graphics visualization. 
-## Key Algorithms and Optimizations
-### A* Heuristic
+`dist[]` holds `g` alone.
+The heuristic is applied when computing the queue priority rather than folded into the edge weight, so `distance(s, d)` still returns a real path length when A* is on.
 
-A* is an informed graph search algorithm that improves upon Dijkstra’s algorithm by using a heuristic to guide the search toward the goal. While Dijkstra explores all possible paths equally, A* tries to prioritize nodes that appear to be closer to the destination. This makes it especially useful in large graphs where the shortest path lies in a specific direction
+### 4-ary heap in IndexPQ
 
-In our implementation, we used the Euclidean distance between a node and the destination as h(n), yielding:
+The provided `IndexPQ` was a binary heap.
+Giving each node four children instead of two cuts the height from `log2 N` to `log4 N`, which halves the levels a `fixUp` or `fixDown` walks, at the cost of comparing four children instead of two on the way down.
 
-- **g(n)** = cost from source to current node n  
-- **h(n)** = Euclidean distance from n to destination  
-- **f(n) = g(n) + h(n)** guides the priority queue
+Index arithmetic, 1-based:
 
-Because `h(n)` never overestimates the true remaining cost, A* explores fewer nodes than plain Dijkstra—especially on long-distance queries—while still guaranteeing optimality.
+- Parent of `i`: `(i + 2) / 4`
+- Children of `i`: `4 * (i - 1) + 2` through `4 * (i - 1) + 5`
 
+### Lazy reset
 
+The provided Dijkstra reinitialised `dist[]` and `pred[]` and filled the queue with all `V` vertices on every query.
+On a graph of 87575 vertices that is the dominant cost when the answer only touches a few hundred of them.
 
-### 4-ary Heap in IndexPQ
-
-In graph algorithms like Dijkstra’s or A*, a priority queue is used to always expand the next "closest" node. This queue is usually implemented using a binary heap, where each node has up to 2 children. In this structure, insertions, deletions, and priority updates all take `O(log₂ N)` time due to the height of the heap.
-
-A 4-ary heap is a variation where each node can have up to 4 children instead of 2. This reduces the height of the heap to `log₄ N`, which is about half as tall as a binary heap. The result? Fewer comparisons and swaps during heap operations, making it faster in practice—even if the theoretical complexity is still logarithmic.
-
-We used a 4-ary heap in our custom IndexPQ class to speed up:
-
-- insert()
-- delMin()
-- change() (priority updates)
-
-Index formulas used:
-
-- Parent index: ⌊(i + 2) / 4⌋
-- Children indices: 4·(i−1)+2 through 4·(i−1)+5
-
-Because of the reduced heap depth, we observed a ~20–30% improvement in runtime for large graphs compared to the same algorithm using a binary heap.
-
-### Lazy Reset
-What it is:
-Traditional Dijkstra reinitializes arrays like `dist[]` and `pred[]` for every query, even though only a small portion of the graph may be used. Lazy reset skips this by using a `seen[]` array and a queryId counter to track which nodes were visited during the current run.
-
-Instead of resetting all of `dist[]`, we only touch the vertices that are actually used, reducing the cost of each query from `O(V)` to `O(V′)`, where V′ is the number of touched nodes.
+Instead, a `seen[]` array records the query id that last touched each vertex.
+A vertex whose `seen[]` entry is stale counts as unvisited, so no array ever has to be cleared.
 
 ```java
-// seen[w] != queryId means w hasn't been touched in this query yet
+// seen[w] != queryId means w has not been touched in this query yet
 if (seen[w] != queryId || baseCost < dist[w] - EPSILON) {
     dist[w] = baseCost;
     pred[w] = v;
-    if (seen[w] != queryId) {
-        pq.insert(w, baseCost);
-    } else {
-        pq.change(w, baseCost);
-    }
+    ...
     seen[w] = queryId;
 }
 ```
-By updating queryId each time, we avoid reinitializing arrays and only work with what we touch.
 
-### Early Stopping
-Standard Dijkstra computes shortest paths to all nodes. But when solving single-pair queries, we only need the path from source to destination. Early stopping exits the loop as soon as the destination is dequeued, since that means its shortest distance is finalized.
+The priority queue is allocated once per `Dijkstra` instance and emptied in O(1) between queries, for the same reason.
+Allocating a fresh `IndexPQ` per query would have cost three O(V) arrays each time and undone most of the benefit.
 
-This optimization significantly reduces unnecessary work, especially when combined with A*.
+### Early stopping
+
+For a single source and destination pair there is no reason to settle the whole graph, so the loop exits as soon as the destination is dequeued.
 
 ```java
 int v = pq.delMin();
-if (v == d) break; // ← Early stopping condition
+if (v == d) break;
 ```
 
 ## Results & Observations
@@ -157,37 +154,58 @@ Variable definitions:
 - Execution time dropped from nearly 2900s to 325s for 50,000 queries.
 - PQ operations reduced by an order of magnitude, and memory usage stayed constant.
 
-## Input format:
-All client programs expect a map file of the form(if repo cloned this is already configured in the `launch.json` file):
-```java
+## Input format
+
+A map file looks like:
+
+```
 <V> <E>
-0  x₀  y₀
-1  x₁  y₁
-…  …   …
-V-1 xᵥ₋₁ yᵥ₋₁
-u₀  v₀
-u₁  v₁
-… 
-uₑ₋₁  vₑ₋₁
+0    x0    y0
+1    x1    y1
+...
+V-1  xV-1  yV-1
+u0   v0
+u1   v1
+...
+uE-1 vE-1
+```
+
+`V` is the number of intersections and `E` the number of two-way roads.
+The next `V` lines give a vertex index and its integer coordinates, and the following `E` lines give unordered pairs of vertex indices.
+Queries are pairs of source and destination indices read from stdin.
+
+## Build and run
 
 ```
-- V = number of vertices (intersections)
-- E = number of edges (two-way roads)
-- Next V lines: vertex index and its (x,y) coordinates
-- Next E lines: unordered pairs of vertex indices denoting roads
-Queries are given as pairs of source–destination indices, either via stdin or command-line args.
-
-
-### Compile and run:
-```java
- javac *.java   
- java Paths usa.txt < usa-5000short.txt
+cd map
+javac *.java
+java Paths usa.txt < usa-5000short.txt
 ```
+
+`Paths` opens a turtle graphics window and draws each path, so the JVM keeps running after the last query until the window is closed.
+`Distances` prints path lengths only and needs no display.
+
+## Tests
+
+The tests use JUnit 5 through the standalone console launcher, which is downloaded on demand rather than committed.
+
+```
+JUNIT=junit-platform-console-standalone-1.10.2.jar
+curl -L -o $JUNIT https://repo1.maven.org/maven2/org/junit/platform/junit-platform-console-standalone/1.10.2/$JUNIT
+javac -d out map/*.java
+javac -cp "out;$JUNIT" -d out test/*.java
+java -jar $JUNIT execute -cp out --select-class=IndexPQTest --select-class=DijkstraTest
+```
+
+`out/` and that jar are both in `.gitignore`.
+
+Use `:` instead of `;` in the classpath on macOS and Linux.
+
+`IndexPQTest` covers `delMin` ordering, raising and lowering a priority with `change`, the 4-ary parent and child invariant read back by reflection, `clear`, and the operation counters.
+`DijkstraTest` builds an eight-vertex graph whose shortest path is obvious by inspection, then asserts that plain Dijkstra and A* return the same path and the same length, that repeated queries on one instance stay correct despite the lazy reset, and that an unreachable destination is reported instead of hanging.
 
 ## Acknowledgments
 
-- [Dijkstra’s Algorithm - w3Schools](https://www.w3schools.com/dsa/dsa_algo_graphs_dijkstra.php)
-- [Sedgewick & Wayne – Algorithms, 4th Edition](https://algs4.cs.princeton.edu/home/)
-- [GeeksforGeeks: 4-ary Heap](https://www.geeksforgeeks.org/k-ary-heap/)
-- [A* Search Algorithm – Red Blob Games](https://www.redblobgames.com/pathfinding/a-star/introduction.html)
-- [Priority Queues and Heaps (MIT OpenCourseWare)](https://ocw.mit.edu/courses/6-006-introduction-to-algorithms-fall-2011/resources/lecture-4-heaps-and-heap-sort/)
+- [Sedgewick and Wayne, Algorithms, 4th edition](https://algs4.cs.princeton.edu/home/)
+- [A* Search Algorithm, Red Blob Games](https://www.redblobgames.com/pathfinding/a-star/introduction.html)
+- [K-ary heap, GeeksforGeeks](https://www.geeksforgeeks.org/k-ary-heap/)
