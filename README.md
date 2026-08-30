@@ -93,66 +93,51 @@ int v = pq.delMin();
 if (v == d) break;
 ```
 
-## Results & Observations
+## Complexity
 
+| Implementation | Worst-case time per query | Extra space |
+| --- | --- | --- |
+| Plain Dijkstra | O((V + E) log V) | O(V + E) |
+| Plus lazy reset | O((Vt + Et) log Vt), over the touched subset Vt, Et | plus O(V) for `seen[]` |
+| Plus A* | O((Va + Ea) log Va), where Va, Ea are no larger than Vt, Et | same |
+| Plus 4-ary heap | O((Va + Ea) log4 Va) | same |
 
-### 1. Complexity analysis
-| Implementation  | Worst-Case Time per Query                       | Additional Space Overhead |
-| --------------- | ----------------------------------------------- | ------------------------- |
-| Plain Dijkstra  | O((V + E) log V)                                | O(V + E)                  |
-| + Lazy Reset    | O((V′ + E′) log V′), where V′, E′ ≪ V, E        | + O(V) for `seen[]` array |
-| + A\* Heuristic | O((V″ + E″) log V″), where V″, E″ ≤ V′, E′      | same                      |
-| + 4-ary Heap    | O((V″ + E″) log₄ V″) ≈ O((V″ + E″) · ½ log₂ V″) | same                      |
+`log4 V` is half of `log2 V`, so the 4-ary heap walks half as many levels per operation.
 
+## Measured results
 
-Variable definitions:
+Everything below was measured on an Intel Core i9-9900K at 3.6 GHz with 32 GB of RAM, Windows 10 and JDK 21.0.2.
+Numbers from one machine and one JDK do not transfer, so treat the ratios as the point rather than the absolute times.
 
-- V: total number of vertices in the graph
-- E: total number of edges in the graph
-- V′, E′: number of vertices and edges actually visited during a query using lazy reset
-- V″, E″: number of vertices and edges actually visited during a query using A* heuristic
+Current code, one run of `java Paths usa.txt < <query file>` per row, reading the summary the program prints.
+"Query time" is the `Total time` line, which sums the per-query search and excludes graph loading and drawing.
+"Wall clock" is the whole process, including the window and the 5 ms pause after each query.
 
-`log₄ V` is approximately half of `log₂ V`, which means the 4-ary heap performs fewer comparisons per priority queue operation.
+| Query file | Queries | Query time | Wall clock | Avg vertices visited | Avg PQ inserts | Avg PQ changes | Avg max PQ size |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `usa-1000long.txt` | 1000 | 1.726 s | 9.4 s | 9589.4 | 9841.9 | 1879.6 | 296.0 |
+| `usa-5000short.txt` | 5000 | 0.300 s | 31.7 s | 405.3 | 435.5 | 75.8 | 33.9 |
+| `usa-50000short.txt` | 50000 | 3.039 s | 309.8 s | 426.4 | 456.6 | 79.2 | 34.3 |
 
+Against the starter template, through `Distances` so that both sides run headless and neither side uses A*.
+This isolates the lazy reset, the early exit and the 4-ary heap.
+Two runs each, wall clock for the whole process, of which roughly 0.9 s is reading and building the graph.
 
-## 2. Empirical Metrics
+| Query file | Starter template (`dd873a0`) | Current |
+| --- | --- | --- |
+| `usa-100long.txt` | 3.02 s, 3.00 s | 1.10 s, 1.12 s |
+| `usa-1000long.txt` | 21.9 s, 22.4 s | 8.84 s, 8.70 s |
 
-### Base Dijkstra algorithm (no improvements)
+### On the numbers this README used to carry
 
-| Input File         | Total Time (s) | Program Time (s) | Avg Vertices Visited | PQ Inserts | PQ Changes | PQ delMins | Max PQ Size | Seen\[] Memory (bytes) | Output Agrees? |
-| ------------------ | -------------- | ---------------- | -------------------- | ---------- | ---------- | ---------- | ----------- | ---------------------- | -------------- |
-| usa-1000long.txt   | 17.399         | 58.980           | 87475.4              | 87475      | 150000     | 87475      | 22000       | 350300                 | Yes            |
-| usa-5000short.txt  | 84.220         | 282.408          | 87563.0              | 87563      | 152000     | 87563      | 23000       | 350300                 | Yes            |
-| usa-50000short.txt | 858.453        | 2863.474         | 1660.2               | 1660       | 4300       | 1660       | 1800        | 350300                 | Yes            |
+An earlier version of this file reported 12.059 s for `usa-50000short.txt`, and `map/readme_class.txt` reports 5.677 s for what should be the same run.
+They cannot both be right, neither reproduces here, and I have no way to tell which machine or build produced which, so both are gone rather than republished.
 
-### Improved Dijkstra Algorithm” (with methods mentioned above)
+The vertex counts did carry over, which is the part that does not depend on the machine.
+Excluding the restored unreachable query, `usa-1000long.txt` averages exactly 9599.0 vertices visited, and `usa-50000short.txt` averages 426.4, both matching what I recorded at the time.
 
-| Input File         | Total Time (s) | Program Time (s) | Avg Vertices Visited | PQ Inserts | PQ Changes | PQ delMins | Max PQ Size | Seen\[] Memory (bytes) | Output Agrees? |
-| ------------------ | -------------- | ---------------- | -------------------- | ---------- | ---------- | ---------- | ----------- | ---------------------- | -------------- |
-| usa-1000long.txt   | 1.837          | 8.944            | 9599.0               | 0.0        | 1881.5     | 9599       | 296.3       | 350300                 | Yes            |
-| usa-5000short.txt  | 1.031          | 32.684           | 405.2                | 0.0        | 75.8       | 405        | 33.9        | 350300                 | Yes            |
-| usa-50000short.txt | 12.059         | 325.033          | 426.4                | 0.0        | 79.2       | 426        | 34.3        | 350300                 | Yes            |
-
-
-
-
-| Column                   | Meaning                                                                                                          |
-| ------------------------ | ---------------------------------------------------------------------------------------------------------------- |
-| **Total Time (s)**       | Cumulative time spent solving all shortest-path queries, excluding visualization and delays (pure compute time). |
-| **Program Time (s)**     | Wall-clock time for the entire program, including graphics rendering and `Thread.sleep(5)` pauses.               |
-| **Avg Vertices Visited** | Mean number of nodes actually relaxed (or “touched”) during each shortest-path query. Lower is better.           |
-| **PQ Inserts**           | Number of times a node was added to the priority queue. Should be non-zero per query (bug noted).                |
-| **PQ Changes**           | Number of times a node’s priority was decreased in the queue (due to a better path found).                       |
-| **PQ delMins**           | Number of `delMin()` operations — roughly matches nodes visited, since each visit pops from the PQ.              |
-| **Max PQ Size**          | Largest size the priority queue reached during a query — gives a sense of the frontier width.                    |
-| **Seen\[] Memory**       | Space in bytes used by the `seen[]` array to track which nodes were touched — constant per run.                  |
-
-
-### Performance imporvements
-- Compared to the baseline version, the optimized algorithm with A* heuristic, lazy reset, and a 4-ary heap achieves dramatic speedups:
-- Over 90% reduction in nodes visited per query for long-range paths.
-- Execution time dropped from nearly 2900s to 325s for 50,000 queries.
-- PQ operations reduced by an order of magnitude, and memory usage stayed constant.
+I have also dropped the claim that the 4-ary heap was worth 20 to 30 percent on its own.
+I never measured the heap in isolation, only the three optimisations together.
 
 ## Input format
 
