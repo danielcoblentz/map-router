@@ -109,12 +109,9 @@
  
              for (IntIterator it = G.neighbors(v); it.hasNext(); ) { //LZ reset code
                  int w = it.next();
+                 // dist[] always holds the true path cost g(w); the heuristic only
+                 // shifts the priority, so distance() stays meaningful under A*.
                  double baseCost = dist[v] + G.distance(v, w);
-                 if (useAStar) {
-                     // A* heuristic adjustment
-                     baseCost += G.distance(w, targetNode)
-                               - G.distance(v, targetNode);
-                 }
  
                  // if unseen or found shorter path
                  // if seen[w] != queryId, dist[w] and pred[w] may be garbage from an old query,
@@ -123,10 +120,13 @@
                     // first touch OR found a better path
                      dist[w] = baseCost;
                      pred[w] = v;
+                     double priority = useAStar
+                                     ? baseCost + G.distance(w, targetNode)
+                                     : baseCost;
                      if (seen[w] != queryId) {
-                         pq.insert(w, baseCost);
+                         pq.insert(w, priority);
                      } else {
-                         pq.change(w, baseCost);
+                         pq.change(w, priority);
                      }
                      seen[w] = queryId;
                  }
