@@ -69,7 +69,10 @@
  
      // draw the shortest path from s to d using Turtle graphics.
      public void drawPath(int s, int d) {
-         if (pred == null || pred[d] == -1) return;
+         // pred[] is deliberately never cleared between queries, so a vertex the
+         // current query never touched still holds a stale predecessor. Walking
+         // that chain runs forever, so reuse the same reachability test as showPath.
+         if (seen[d] != queryId) return;
          Turtle.setColor(Color.red);
          for (int v = d; v != s; v = pred[v])
              G.point(v).drawTo(G.point(pred[v]));
