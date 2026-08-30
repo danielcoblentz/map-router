@@ -1,2 +1,10 @@
+# compiled output
+*.class
+bin/
+out/
 
+# JUnit console launcher, downloaded on demand rather than committed
+junit-platform-console-standalone-*.jar
+
+# local copy of the course readme template
 readme.txt
