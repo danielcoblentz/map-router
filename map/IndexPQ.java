@@ -35,6 +35,7 @@
 
     // insert key k with given priority
     public void insert(int k, double val) {
+        insertCount++;
         N++;
         qp[k] = N;
         pq[N] = k;
