@@ -1,6 +1,6 @@
 # Map Routing
 
-Repeated shortest-path queries on the continental US road network, using A* search, a lazy per-query reset, and a 4-ary indexed priority queue.
+Repeated shortest-path queries on the continental US road network, using A* search, a lazy per-query reset, a 4-ary indexed priority queue, and contraction hierarchies.
 
 ## Provenance
 
@@ -25,6 +25,7 @@ Everything under `map/c/`, and every `usa-*.txt`, `grid*.txt` and `input6.txt` d
 - The 4-ary heap in `IndexPQ`, replacing the provided binary heap.
 - The counters in `IndexPQ` and the per-query and summary reporting in `Paths`.
 - The bug fixes below and the JUnit tests under `test/`.
+- `ContractionHierarchy`, the `ch` option to `Distances`, and the `ValidateCH` checker, added after the assignment.
 
 ## Known limitations
 
@@ -38,6 +39,9 @@ The lines are restored, `drawPath` now uses the same reachability test as `showP
 
 **`Distances` does not use A*.**
 Only `Paths` and `ShortestPath` call `enableAStar`, so `java Distances` runs plain Dijkstra with the lazy reset and the 4-ary heap.
+
+**`Paths` and `ShortestPath` do not use the contraction hierarchy.**
+Only `Distances` (with the `ch` argument) and `ValidateCH` build one, because building it takes about 5 seconds, and that only pays off over many queries.
 
 **The heuristic assumes Euclidean edge weights.**
 Edge cost is the straight-line distance between endpoints, so straight-line distance to the goal never overestimates and the search stays optimal.
@@ -93,6 +97,24 @@ int v = pq.delMin();
 if (v == d) break;
 ```
 
+### Contraction hierarchies
+
+Preprocessing contracts the vertices one at a time, least important first.
+Contracting `v` removes it from the remaining graph, and for every pair of neighbours `u`, `w` whose only shortest connection ran through `v` it adds a shortcut `u-w` of length `d(u,v) + d(v,w)`.
+A bounded local Dijkstra, the witness search, checks whether some other path is at least as short, in which case no shortcut is needed.
+Importance is the edge difference (shortcuts added minus edges removed, weighted 2) plus the number of neighbours already contracted, recomputed for the neighbours after each contraction.
+
+Each edge ends up stored only at its lower-ranked endpoint, so every vertex keeps just its upward edges.
+A query runs Dijkstra upward from `s` and upward from `d` at the same time, and the answer is the vertex where the two searches meet most cheaply.
+Each side stops as soon as the smallest key in its queue is no better than the best meeting point found so far.
+The roads are two-way, so one upward graph serves both directions.
+
+Each shortcut remembers the vertex it bypasses, so `path()` unpacks it recursively into the original road segments.
+
+The witness search gives up after settling 200 vertices, or 20 when it is only estimating a vertex's importance.
+Giving up early can add a shortcut that was not needed, but it can never drop a needed one, so the limits trade preprocessing time against query time and never affect correctness.
+On `usa.txt`, raising both limits to 500 with an edge-difference weight of 1 made preprocessing take 22 s instead of about 5 s, and did not make queries any faster.
+
 ## Complexity
 
 | Implementation | Worst-case time per query | Extra space |
@@ -127,6 +149,27 @@ Two runs each, wall clock for the whole process, of which roughly 0.9 s is readi
 | --- | --- | --- |
 | `usa-100long.txt` | 3.02 s, 3.00 s | 1.10 s, 1.12 s |
 | `usa-1000long.txt` | 21.9 s, 22.4 s | 8.84 s, 8.70 s |
+
+### Contraction hierarchies against A*
+
+Measured with `java ValidateCH usa.txt < <query file>`, on a different machine from the tables above: a 4-core Intel Xeon at 2.1 GHz, Linux and OpenJDK 21.0.12.
+Both columns are pure search time, summed over the file, from the same process, and every answer matched with 0 mismatches.
+"Settled" counts vertices removed from the queue, adding both directions together for CH.
+
+Preprocessing `usa.txt` took 4.1 to 5.2 s across these runs and added 175565 shortcuts to the 121961 roads.
+
+| Query file | Queries | A* time | A* avg settled | CH time | CH avg settled |
+| --- | --- | --- | --- | --- | --- |
+| `usa-100long.txt` | 100 | 0.139 s | 8948.4 | 0.018 s | 606.5 |
+| `usa-1000long.txt` | 1000 | 1.533 s | 9589.4 | 0.168 s | 631.4 |
+| `usa-5000short.txt` | 5000 | 0.348 s | 405.3 | 0.114 s | 87.7 |
+| `usa-50000short.txt` | 50000 | 3.476 s | 426.4 | 1.064 s | 87.9 |
+
+On long queries CH settles about 15 times fewer vertices and runs about 9 times faster.
+On short queries the gain is smaller, around 3 times, because A* already settles only about 400 vertices.
+Preprocessing costs about as much as 3000 long A* queries, so CH only pays off for workloads at least that size.
+
+End to end on the same machine, `java Distances usa.txt ch < usa-1000long.txt` ran in 5.0 s, including preprocessing, against 9.7 s for `java Distances usa.txt`, and the two printed identical distances.
 
 ### On the numbers this README used to carry
 
@@ -167,6 +210,15 @@ javac *.java
 java Paths usa.txt < usa-5000short.txt
 ```
 
+To answer with the contraction hierarchy instead, or to check it against Dijkstra headlessly:
+
+```
+java Distances usa.txt ch < usa-1000long.txt
+java ValidateCH usa.txt < usa-1000long.txt
+```
+
+`ValidateCH` exits non-zero if any CH distance differs from Dijkstra's, or if any unpacked CH path is not a chain of real roads with the reported length.
+
 `Paths` opens a turtle graphics window and draws each path, so the JVM keeps running after the last query until the window is closed.
 `Distances` prints path lengths only and needs no display.
 
@@ -179,7 +231,7 @@ JUNIT=junit-platform-console-standalone-1.10.2.jar
 curl -L -o $JUNIT https://repo1.maven.org/maven2/org/junit/platform/junit-platform-console-standalone/1.10.2/$JUNIT
 javac -d out map/*.java
 javac -cp "out;$JUNIT" -d out test/*.java
-java -jar $JUNIT execute -cp out --select-class=IndexPQTest --select-class=DijkstraTest
+java -jar $JUNIT execute -cp out --select-class=IndexPQTest --select-class=DijkstraTest --select-class=ContractionHierarchyTest
 ```
 
 `out/` and that jar are both in `.gitignore`.
@@ -189,8 +241,12 @@ Use `:` instead of `;` in the classpath on macOS and Linux.
 `IndexPQTest` covers `delMin` ordering, raising and lowering a priority with `change`, the 4-ary parent and child invariant read back by reflection, `clear`, and the operation counters.
 `DijkstraTest` builds an eight-vertex graph whose shortest path is obvious by inspection, then asserts that plain Dijkstra and A* return the same path and the same length, that repeated queries on one instance stay correct despite the lazy reset, and that an unreachable destination is reported instead of hanging.
 
+`ContractionHierarchyTest` runs the hand-checked graph through the CH, covering paths, `s == d`, an unreachable destination and repeated queries.
+It then checks every source and destination pair of four random 150-vertex graphs with several components and parallel edges against plain Dijkstra, and confirms that each unpacked path is made of real roads and adds up to the reported distance.
+
 ## Acknowledgments
 
 - [Sedgewick and Wayne, Algorithms, 4th edition](https://algs4.cs.princeton.edu/home/)
 - [A* Search Algorithm, Red Blob Games](https://www.redblobgames.com/pathfinding/a-star/introduction.html)
 - [K-ary heap, GeeksforGeeks](https://www.geeksforgeeks.org/k-ary-heap/)
+- Geisberger, Sanders, Schultes and Delling, Contraction Hierarchies: Faster and Simpler Hierarchical Routing in Road Networks, WEA 2008
